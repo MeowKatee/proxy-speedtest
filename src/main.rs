@@ -19,6 +19,20 @@ struct Args {
     #[arg(short, long)]
     whitelist_patterns: Vec<String>,
 
+    /// Regex pattern to filter node tags, blacklist
+    ///
+    /// AND logic is applied if multiple patterns are provided
+    ///
+    /// For example, to exclude nodes with both "US" and "0.2" included,
+    ///
+    /// pass `-b US -b 0.2`.
+    ///
+    /// To exclude nodes with either "JP" or "1.5" included,
+    ///
+    /// pass `-b "JP|1.5"`
+    #[arg(short, long)]
+    blacklist_patterns: Vec<String>,
+
     /// Download test size in MB (optional, enables speed test if provided)
     #[arg(short = 'd', long = "download-mb")]
     download_mb: Option<u32>,
@@ -239,9 +253,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config_path,
         download_mb,
         whitelist_patterns,
+        blacklist_patterns,
     } = Args::parse();
 
     let whitelist_patterns = RegexSet::new(whitelist_patterns)?;
+    let blacklist_patterns = RegexSet::new(blacklist_patterns)?;
 
     let config_content = match fs::read_to_string(&config_path) {
         Ok(content) => content,
@@ -278,7 +294,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if inbound_type == "socks" {
                 let listen_addr = listen.unwrap_or_else(|| "127.0.0.1".to_string());
 
-                let tag_matches = whitelist_patterns.matches(&tag).matched_all();
+                let tag_matches = whitelist_patterns.matches(&tag).matched_all()
+                    && (blacklist_patterns.is_empty()
+                        || !blacklist_patterns.matches(&tag).matched_all());
                 if tag_matches && matches!(listen_addr.as_str(), "127.0.0.1" | "::1" | "localhost")
                 {
                     socks_nodes.push((tag, port));
@@ -292,7 +310,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("❌ 未找到任何 socks 类型的 inbound");
         } else {
             eprintln!("❌ 未找到匹配正则表达式的 socks 节点");
-            eprintln!("   使用正则: {:?}", whitelist_patterns);
+            eprintln!("   白名单正则: {whitelist_patterns:?}");
+            eprintln!("   黑名单正则: {blacklist_patterns:?}");
         }
         return Ok(());
     }
