@@ -34,7 +34,7 @@ jobs:
     needs: create-release
     runs-on: ${{ matrix.os }}
     env:
-      RUST_BIN_NAME: "kemono-cli"
+      RUST_BIN_NAME: "proxy-speedtest"
       ADDITIONAL_FILES: "README.md LICENSE"
     strategy:
       fail-fast: false
