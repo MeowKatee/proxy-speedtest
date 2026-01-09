@@ -1,5 +1,5 @@
 use palc::Parser;
-use regex::Regex;
+use regex::RegexSet;
 use reqwest::{Client, Proxy};
 use serde::Deserialize;
 use std::fs;
@@ -12,8 +12,13 @@ use tokio::time::timeout;
 struct Args {
     /// Path to the SingBox config JSON file
     config_path: String,
-    /// Regex pattern to filter node tags (can specify multiple patterns)
-    regexes: Vec<String>,
+
+    /// Regex pattern to filter node tags, whitelist
+    ///
+    /// AND logic is applied if multiple patterns are provided
+    #[arg(short, long)]
+    whitelist_patterns: Vec<String>,
+
     /// Download test size in MB (optional, enables speed test if provided)
     #[arg(short = 'd', long = "download-mb")]
     download_mb: Option<u32>,
@@ -233,19 +238,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let Args {
         config_path,
         download_mb,
-        regexes,
+        whitelist_patterns,
     } = Args::parse();
 
-    let mut compiled_regexes = Vec::new();
-    for pattern in &regexes {
-        match Regex::new(pattern) {
-            Ok(re) => compiled_regexes.push(re),
-            Err(e) => {
-                eprintln!("❌ 无效的正则表达式 '{}': {}", pattern, e);
-                return Ok(());
-            }
-        }
-    }
+    let whitelist_patterns = RegexSet::new(whitelist_patterns)?;
 
     let config_content = match fs::read_to_string(&config_path) {
         Ok(content) => content,
@@ -282,12 +278,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if inbound_type == "socks" {
                 let listen_addr = listen.unwrap_or_else(|| "127.0.0.1".to_string());
 
-                let tag_matches = if compiled_regexes.is_empty() {
-                    true
-                } else {
-                    compiled_regexes.iter().all(|re| re.is_match(&tag))
-                };
-
+                let tag_matches = whitelist_patterns.matches(&tag).matched_all();
                 if tag_matches && matches!(listen_addr.as_str(), "127.0.0.1" | "::1" | "localhost")
                 {
                     socks_nodes.push((tag, port));
@@ -297,11 +288,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if socks_nodes.is_empty() {
-        if regexes.is_empty() {
+        if whitelist_patterns.is_empty() {
             eprintln!("❌ 未找到任何 socks 类型的 inbound");
         } else {
             eprintln!("❌ 未找到匹配正则表达式的 socks 节点");
-            eprintln!("   使用正则: {:?}", regexes);
+            eprintln!("   使用正则: {:?}", whitelist_patterns);
         }
         return Ok(());
     }
